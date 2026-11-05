@@ -17,24 +17,92 @@ class SpotifyBridgeService : NotificationListenerService() {
     companion object {
         private const val TAG = "SpotifyBridge"
         private const val SPOTIFY_PACKAGE = "com.spotify.music"
+        val capturedLogs = mutableListOf<String>()
+
+        fun sendTopwayBroadcasts(
+            context: Context,
+            track: String,
+            artist: String,
+            album: String,
+            isPlaying: Boolean,
+            targets: Set<String>
+        ) {
+            val actions = listOf(
+                "com.spotify.music.metadatachanged",
+                "com.spotify.music.playbackstatechanged",
+                "com.android.music.metachanged",
+                "com.android.music.playstatechanged",
+                "com.android.music.playbackcomplete",
+                "com.tw.music.metachanged",
+                "com.tw.music.playstatechanged",
+                "com.tw.driving.metachanged",
+                "com.tw.action.MEDIA_INFO"
+            )
+
+            for (action in actions) {
+                val baseIntent = Intent(action).apply {
+                    addFlags(Intent.FLAG_INCLUDE_STOPPED_PACKAGES or 0x01000000)
+                    putExtra("id", 1L)
+                    putExtra("artist", artist)
+                    putExtra("album", album)
+                    putExtra("track", track)
+                    putExtra("title", track)
+                    putExtra("playing", isPlaying)
+                    putExtra("playstate", isPlaying)
+                    putExtra("isPlaying", isPlaying)
+                    putExtra("package", SPOTIFY_PACKAGE)
+                    putExtra("player", "Spotify")
+                    putExtra("position", 1000L)
+                    putExtra("duration", 200000L)
+                }
+
+                // 1. Envío global sin paquete (para receptores dinámicos en RAM de com.tw.driving)
+                context.sendBroadcast(baseIntent)
+
+                // 2. Envío explícito a cada paquete com.tw.* y com.android.launcher
+                for (pkg in targets) {
+                    val explicitIntent = Intent(baseIntent).apply {
+                        setPackage(pkg)
+                    }
+                    context.sendBroadcast(explicitIntent)
+                }
+            }
+        }
     }
 
     private val handler = Handler(Looper.getMainLooper())
 
     private val topwayControlReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
-            when (intent?.action) {
-                "com.ts.music.next", "action.media.next", "com.android.music.musicservicecommand.next" -> {
+            val act = intent?.action ?: return
+            val extrasStr = intent.extras?.keySet()?.joinToString { k -> "$k=${intent.extras?.get(k)}" } ?: ""
+            val entry = "$act [$extrasStr]"
+            if (capturedLogs.size > 15) capturedLogs.removeAt(0)
+            capturedLogs.add(entry)
+
+            when (act) {
+                "com.tw.music.next", "com.ts.music.next", "action.media.next",
+                "com.android.music.musicservicecommand.next", "com.tw.driving.next" -> {
                     handler.postDelayed({ simulateMediaKey(KeyEvent.KEYCODE_MEDIA_NEXT) }, 150)
                 }
-                "com.ts.music.prev", "action.media.prev", "com.android.music.musicservicecommand.previous" -> {
+                "com.tw.music.prev", "com.ts.music.prev", "action.media.prev",
+                "com.android.music.musicservicecommand.previous", "com.tw.driving.prev" -> {
                     handler.postDelayed({ simulateMediaKey(KeyEvent.KEYCODE_MEDIA_PREVIOUS) }, 150)
                 }
-                "com.ts.music.play", "action.media.play", "com.android.music.musicservicecommand.togglepause" -> {
+                "com.tw.music.play", "com.ts.music.play", "action.media.play",
+                "com.android.music.musicservicecommand.togglepause", "com.tw.driving.play" -> {
                     handler.postDelayed({ simulateMediaKey(KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE) }, 150)
                 }
-                "com.ts.music.pause", "action.media.pause" -> {
+                "com.tw.music.pause", "com.ts.music.pause", "action.media.pause", "com.tw.driving.pause" -> {
                     simulateMediaKey(KeyEvent.KEYCODE_MEDIA_PAUSE)
+                }
+                "com.android.music.musicservicecommand" -> {
+                    when (intent.getStringExtra("command")) {
+                        "next" -> handler.postDelayed({ simulateMediaKey(KeyEvent.KEYCODE_MEDIA_NEXT) }, 150)
+                        "previous" -> handler.postDelayed({ simulateMediaKey(KeyEvent.KEYCODE_MEDIA_PREVIOUS) }, 150)
+                        "togglepause", "play" -> handler.postDelayed({ simulateMediaKey(KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE) }, 150)
+                        "pause" -> simulateMediaKey(KeyEvent.KEYCODE_MEDIA_PAUSE)
+                    }
                 }
             }
         }
@@ -56,6 +124,14 @@ class SpotifyBridgeService : NotificationListenerService() {
     override fun onCreate() {
         super.onCreate()
         val filter = IntentFilter().apply {
+            addAction("com.tw.music.next")
+            addAction("com.tw.music.prev")
+            addAction("com.tw.music.play")
+            addAction("com.tw.music.pause")
+            addAction("com.tw.driving.next")
+            addAction("com.tw.driving.prev")
+            addAction("com.tw.driving.play")
+            addAction("com.tw.driving.pause")
             addAction("com.ts.music.next")
             addAction("com.ts.music.prev")
             addAction("com.ts.music.play")
@@ -65,6 +141,9 @@ class SpotifyBridgeService : NotificationListenerService() {
             addAction("action.media.play")
             addAction("action.media.pause")
             addAction("com.android.music.musicservicecommand")
+            addAction("com.android.music.musicservicecommand.next")
+            addAction("com.android.music.musicservicecommand.previous")
+            addAction("com.android.music.musicservicecommand.togglepause")
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             registerReceiver(topwayControlReceiver, filter, RECEIVER_EXPORTED)
@@ -113,67 +192,27 @@ class SpotifyBridgeService : NotificationListenerService() {
         val artist = extras.getCharSequence("android.text")?.toString() ?: ""
         val subText = extras.getCharSequence("android.subText")?.toString() ?: ""
 
-        emitAllBroadcasts(title, artist, subText, true)
+        sendTopwayBroadcasts(this, title, artist, subText, true, getTwTargetPackages())
     }
 
     override fun onNotificationRemoved(sbn: StatusBarNotification?) {
         super.onNotificationRemoved(sbn)
         if (sbn?.packageName == SPOTIFY_PACKAGE) {
-            emitAllBroadcasts("", "", "", false)
+            sendTopwayBroadcasts(this, "", "", "", false, getTwTargetPackages())
         }
     }
 
-    private fun getDynamicTargetPackages(): Set<String> {
-        val targets = mutableSetOf("com.ts.MainUI", "com.android.launcher3", "com.android.systemui")
+    private fun getTwTargetPackages(): Set<String> {
+        val targets = mutableSetOf("com.tw.driving", "com.android.launcher", "com.tw.music")
         try {
-            val homeIntent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
-            packageManager.queryIntentActivities(homeIntent, 0).forEach {
-                targets.add(it.activityInfo.packageName)
-            }
             packageManager.getInstalledPackages(0).forEach { p ->
-                val name = p.packageName
-                if (name.contains("ts.", true) || name.contains("launcher", true) || name.contains("mainui", true)) {
-                    targets.add(name)
+                if (p.packageName.startsWith("com.tw") || p.packageName.contains("launcher")) {
+                    targets.add(p.packageName)
                 }
             }
         } catch (e: Exception) {
             e.printStackTrace()
         }
         return targets
-    }
-
-    private fun emitAllBroadcasts(track: String, artist: String, album: String, isPlaying: Boolean) {
-        val actions = listOf(
-            "com.spotify.music.metadatachanged",
-            "com.spotify.music.playbackstatechanged",
-            "com.android.music.metachanged",
-            "com.android.music.playstatechanged",
-            "com.ts.music.metachanged"
-        )
-
-        val targetPackages = getDynamicTargetPackages()
-
-        for (action in actions) {
-            val baseIntent = Intent(action).apply {
-                addFlags(Intent.FLAG_INCLUDE_STOPPED_PACKAGES or 0x01000000)
-                putExtra("id", 1L)
-                putExtra("artist", artist)
-                putExtra("album", album)
-                putExtra("track", track)
-                putExtra("playing", isPlaying)
-                putExtra("playstate", isPlaying)
-                putExtra("isPlaying", isPlaying)
-                putExtra("package", SPOTIFY_PACKAGE)
-            }
-
-            sendBroadcast(baseIntent)
-
-            for (pkg in targetPackages) {
-                val explicitIntent = Intent(baseIntent).apply {
-                    setPackage(pkg)
-                }
-                sendBroadcast(explicitIntent)
-            }
-        }
     }
 }
