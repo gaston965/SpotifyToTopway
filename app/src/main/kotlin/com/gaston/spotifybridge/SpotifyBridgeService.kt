@@ -26,7 +26,6 @@ class SpotifyBridgeService : NotificationListenerService() {
             album: String,
             isPlaying: Boolean
         ) {
-            // Acciones combinadas para Topway, Cardoor y Android estandar
             val actions = listOf(
                 "com.spotify.music.metadatachanged",
                 "com.spotify.music.playbackstatechanged",
@@ -35,7 +34,7 @@ class SpotifyBridgeService : NotificationListenerService() {
                 "com.tw.music.metadatachanged",
                 "com.tw.music.playstatechanged",
                 "com.tw.tdservice.music.metadatachanged",
-                "com.tw.driving.metazchanged"
+                "com.tw.driving.metadatachanged"
             )
 
             val targetPackages = listOf(
@@ -60,10 +59,8 @@ class SpotifyBridgeService : NotificationListenerService() {
                     putExtra("player", "Spotify")
                 }
 
-                // Envío global abierto
                 context.sendBroadcast(baseIntent)
 
-                // Envío dirigido explícito a los paquetes detectados en el escáner
                 for (pkg in targetPackages) {
                     val explicitIntent = Intent(baseIntent).apply {
                         setPackage(pkg)
