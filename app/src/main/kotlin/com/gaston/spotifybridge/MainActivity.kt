@@ -79,7 +79,7 @@ class MainActivity : Activity() {
                     "Topway TS10",
                     "Spotify",
                     true,
-                    twPackages
+                   
                 )
                 Toast.makeText(
                     this@MainActivity,
