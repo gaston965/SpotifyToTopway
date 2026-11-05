@@ -1,11 +1,9 @@
 package com.gaston.spotifybridge
 
 import android.content.BroadcastReceiver
-import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
-import android.media.session.MediaSessionManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -19,14 +17,6 @@ class SpotifyBridgeService : NotificationListenerService() {
     companion object {
         private const val TAG = "SpotifyBridge"
         private const val SPOTIFY_PACKAGE = "com.spotify.music"
-        
-        // Paquetes del sistema Topway que escuchan las fuentes de música
-        private val TOPWAY_PACKAGES = listOf(
-            "com.ts.MainUI",
-            "com.android.launcher3",
-            "com.ts.launcher",
-            "com.android.systemui"
-        )
     }
 
     private val handler = Handler(Looper.getMainLooper())
@@ -52,8 +42,6 @@ class SpotifyBridgeService : NotificationListenerService() {
 
     override fun onListenerConnected() {
         super.onListenerConnected()
-        Log.d(TAG, "Listener conectado. Revisando notificaciones activas...")
-        // Apenas le das permiso o arranca el estéreo, revisa si Spotify ya está abierto
         try {
             activeNotifications?.forEach { sbn ->
                 if (sbn.packageName == SPOTIFY_PACKAGE) {
@@ -135,6 +123,25 @@ class SpotifyBridgeService : NotificationListenerService() {
         }
     }
 
+    private fun getDynamicTargetPackages(): Set<String> {
+        val targets = mutableSetOf("com.ts.MainUI", "com.android.launcher3", "com.android.systemui")
+        try {
+            val homeIntent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
+            packageManager.queryIntentActivities(homeIntent, 0).forEach {
+                targets.add(it.activityInfo.packageName)
+            }
+            packageManager.getInstalledPackages(0).forEach { p ->
+                val name = p.packageName
+                if (name.contains("ts.", true) || name.contains("launcher", true) || name.contains("mainui", true)) {
+                    targets.add(name)
+                }
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+        return targets
+    }
+
     private fun emitAllBroadcasts(track: String, artist: String, album: String, isPlaying: Boolean) {
         val actions = listOf(
             "com.spotify.music.metadatachanged",
@@ -144,11 +151,11 @@ class SpotifyBridgeService : NotificationListenerService() {
             "com.ts.music.metachanged"
         )
 
+        val targetPackages = getDynamicTargetPackages()
+
         for (action in actions) {
             val baseIntent = Intent(action).apply {
-                addFlags(Intent.FLAG_INCLUDE_STOPPED_PACKAGES)
-                // En Android 8+ esta bandera permite que receptores en Manifest reciban el broadcast en background
-                addFlags(0x01000000) // Intent.FLAG_RECEIVER_INCLUDE_BACKGROUND
+                addFlags(Intent.FLAG_INCLUDE_STOPPED_PACKAGES or 0x01000000)
                 putExtra("id", 1L)
                 putExtra("artist", artist)
                 putExtra("album", album)
@@ -157,16 +164,11 @@ class SpotifyBridgeService : NotificationListenerService() {
                 putExtra("playstate", isPlaying)
                 putExtra("isPlaying", isPlaying)
                 putExtra("package", SPOTIFY_PACKAGE)
-                putExtra("player", "Spotify")
-                putExtra("position", 0L)
-                putExtra("duration", 180000L)
             }
 
-            // 1. Envío global implícito con bandera de background
             sendBroadcast(baseIntent)
 
-            // 2. Envío explícito dirigido directamente a los paquetes del launcher Topway
-            for (pkg in TOPWAY_PACKAGES) {
+            for (pkg in targetPackages) {
                 val explicitIntent = Intent(baseIntent).apply {
                     setPackage(pkg)
                 }
