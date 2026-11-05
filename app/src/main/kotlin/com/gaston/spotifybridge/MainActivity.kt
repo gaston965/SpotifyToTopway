@@ -90,6 +90,32 @@ class MainActivity : Activity() {
         }
         layout.addView(btnTest)
 
+          val btnApk = Button(this).apply {
+            text = "3. Copiar APK de com.tw.driving y com.tw.music"
+            setOnClickListener {
+                val destino = getExternalFilesDir(null)
+                val resultado = StringBuilder()
+                for (pkg in listOf("com.tw.driving", "com.tw.music")) {
+                    try {
+                        val src = packageManager.getApplicationInfo(pkg, 0).sourceDir
+                        java.io.File(src).copyTo(java.io.File(destino, "$pkg.apk"), overwrite = true)
+                        resultado.append("OK $pkg\n")
+                    } catch (e: Exception) {
+                        resultado.append("ERROR $pkg: ${e.message}\n")
+                    }
+                }
+                Toast.makeText(
+                    this@MainActivity,
+                    resultado.toString() + "Carpeta: " + destino,
+                    Toast.LENGTH_LONG
+                ).show()
+            }
+        }
+        layout.addView(btnApk)
+
+
+
+         
         val scroll = ScrollView(this).apply {
             addView(logText)
         }
