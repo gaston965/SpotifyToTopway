@@ -49,17 +49,8 @@ class MainActivity : Activity() {
         }
         layout.addView(btnTest)
 
-        val btnActive = Button(this).apply {
-            text = "3. (Opcional) Despertar TWSpotify: com.spotify.music.active"
-            setOnClickListener {
-                this@MainActivity.sendBroadcast(Intent("com.spotify.music.active"))
-                Toast.makeText(this@MainActivity, "Enviado com.spotify.music.active", Toast.LENGTH_SHORT).show()
-            }
-        }
-        layout.addView(btnActive)
-
         val btnRefresh = Button(this).apply {
-            text = "4. Actualizar registro"
+            text = "3. Actualizar pantalla"
             setOnClickListener { refreshLogs() }
         }
         layout.addView(btnRefresh)
@@ -87,15 +78,27 @@ class MainActivity : Activity() {
         val isGranted = enabledListeners.contains(packageName)
 
         val sb = StringBuilder()
-        sb.append("=== ESTADO DEL PUENTE (version v2: musicinfo fiel a TWSpotify) ===\n")
+        sb.append("=== ESTADO DEL PUENTE (version v3: varias apps) ===\n")
         sb.append("Permiso Notificaciones: ${if (isGranted) "ACTIVO (OK)" else "INACTIVO (Toca el boton 1)"}\n\n")
-        sb.append("=== COMANDOS RECIBIDOS DE LA HOME ===\n")
+
+        sb.append("=== APPS PERMITIDAS ===\n")
+        SpotifyBridgeService.allowedPackages.forEach { sb.append("* $it\n") }
+
+        sb.append("\n=== SESIONES DE MEDIOS DETECTADAS ===\n")
+        if (SpotifyBridgeService.detectedSessions.isEmpty()) {
+            sb.append("(Ninguna. Abre una app de musica, ponele play y toca 'Actualizar pantalla')\n")
+        } else {
+            SpotifyBridgeService.detectedSessions.forEach { sb.append("-> $it\n") }
+        }
+
+        sb.append("\n=== ULTIMO ENVIO A LA HOME ===\n")
+        sb.append(SpotifyBridgeService.lastPush + "\n")
+
+        sb.append("\n=== COMANDOS RECIBIDOS DE LA HOME ===\n")
         if (SpotifyBridgeService.capturedLogs.isEmpty()) {
             sb.append("(Ninguno aun. Toca Play/Next en la home Driving y vuelve aqui)\n")
         } else {
-            SpotifyBridgeService.capturedLogs.forEach {
-                sb.append("-> $it\n")
-            }
+            SpotifyBridgeService.capturedLogs.forEach { sb.append("-> $it\n") }
         }
         logText.text = sb.toString()
     }
