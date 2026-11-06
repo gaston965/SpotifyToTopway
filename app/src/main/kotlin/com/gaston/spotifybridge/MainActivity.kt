@@ -90,28 +90,39 @@ class MainActivity : Activity() {
         }
         layout.addView(btnTest)
 
-          val btnApk = Button(this).apply {
-            text = "3. Copiar APK de com.tw.driving y com.tw.music"
-            setOnClickListener {
-                val destino = getExternalFilesDir(null)
-                val resultado = StringBuilder()
-                for (pkg in listOf("com.tw.driving", "com.tw.music")) {
-                    try {
-                        val src = packageManager.getApplicationInfo(pkg, 0).sourceDir
-                        java.io.File(src).copyTo(java.io.File(destino, "$pkg.apk"), overwrite = true)
-                        resultado.append("OK $pkg\n")
-                    } catch (e: Exception) {
-                        resultado.append("ERROR $pkg: ${e.message}\n")
-                    }
-                }
-                Toast.makeText(
-                    this@MainActivity,
-                    resultado.toString() + "Carpeta: " + destino,
-                    Toast.LENGTH_LONG
-                ).show()
+          val btnReporte = Button(this).apply {
+    text = "3. Generar reporte y copiar APK de com.tw*"
+    setOnClickListener {
+        val destino = getExternalFilesDir(null)
+        val r = StringBuilder()
+        r.append("=== SISTEMA ===\n")
+        r.append("Android: ${android.os.Build.VERSION.RELEASE} (SDK ${android.os.Build.VERSION.SDK_INT})\n")
+        r.append("Modelo: ${android.os.Build.MODEL} / ${android.os.Build.DEVICE}\n")
+        r.append("Build: ${android.os.Build.DISPLAY}\n\n")
+        r.append("=== ACCESO A NOTIFICACIONES (activos) ===\n")
+        r.append((Settings.Secure.getString(contentResolver, "enabled_notification_listeners") ?: "(ninguno)") + "\n\n")
+        r.append("=== PAQUETES com.tw* ===\n")
+        val flags = PackageManager.GET_SERVICES or PackageManager.GET_RECEIVERS or PackageManager.GET_PROVIDERS
+        for (p in packageManager.getInstalledPackages(flags)) {
+            if (!p.packageName.startsWith("com.tw")) continue
+            r.append("* ${p.packageName}  v${p.versionName}  uid=${p.sharedUserId}\n")
+            r.append("   apk: ${p.applicationInfo.sourceDir}\n")
+            p.services?.forEach { s -> r.append("   [S] ${s.name} exported=${s.exported} perm=${s.permission}\n") }
+            p.receivers?.forEach { x -> r.append("   [R] ${x.name} exported=${x.exported} perm=${x.permission}\n") }
+            p.providers?.forEach { x -> r.append("   [P] ${x.name} auth=${x.authority} exported=${x.exported}\n") }
+            try {
+                java.io.File(p.applicationInfo.sourceDir)
+                    .copyTo(java.io.File(destino, p.packageName + ".apk"), overwrite = true)
+                r.append("   copia: OK\n")
+            } catch (e: Exception) {
+                r.append("   copia: ERROR ${e.message}\n")
             }
         }
-        layout.addView(btnApk)
+        java.io.File(destino, "reporte.txt").writeText(r.toString())
+        Toast.makeText(this@MainActivity, "Listo: $destino/reporte.txt", Toast.LENGTH_LONG).show()
+    }
+}
+layout.addView(btnReporte)
 
 
 
