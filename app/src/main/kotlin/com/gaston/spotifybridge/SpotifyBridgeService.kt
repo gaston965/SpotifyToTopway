@@ -8,10 +8,13 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.graphics.Bitmap
 import android.graphics.drawable.BitmapDrawable
+import android.media.MediaMetadata
 import android.media.session.MediaController
 import android.media.session.MediaSessionManager
 import android.media.session.PlaybackState
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import android.util.Log
@@ -22,8 +25,20 @@ class SpotifyBridgeService : NotificationListenerService() {
 
     companion object {
         private const val TAG = "SpotifyBridge"
-        private const val SPOTIFY_PACKAGE = "com.spotify.music"
+
+        // Apps cuya música se manda a la home. Para agregar otra, sumá su paquete acá.
+        // (El paquete de AIMP es el que conozco, pero verificalo con la lista
+        //  "SESIONES DE MEDIOS DETECTADAS" que muestra la app mientras suena.)
+        val allowedPackages = setOf(
+            "com.spotify.music",
+            "com.google.android.apps.youtube.music",
+            "com.google.android.youtube",
+            "com.aimp.player"
+        )
+
         val capturedLogs = mutableListOf<String>()
+        val detectedSessions = mutableListOf<String>()
+        var lastPush: String = "(ninguno)"
 
         // Carátula mínima (cuadrado gris) para cuando no hay imagen:
         // TWSpotify siempre manda un byte[] en msg_Albumart.
@@ -35,11 +50,11 @@ class SpotifyBridgeService : NotificationListenerService() {
             return bos.toByteArray()
         }
 
-        // Manda a la home EXACTAMENTE lo que manda TWSpotify, con los mismos
-        // nombres y tipos (sacados de com.tw.spotify, sendMusicInfoReceiver):
+        // Manda a la home lo mismo que mandaba TWSpotify, con los mismos nombres y tipos:
         //   musicType -> String, playState -> Boolean, msg_Artist -> String,
         //   msg_Song -> String, msg_Albumart -> byte[]
-        // Un solo broadcast por evento.
+        // Se usa musicType = "spotify" para TODAS las apps: es el único valor que
+        // sabemos que la home acepta (no conocemos otros valores).
         fun sendTopwayBroadcasts(
             context: Context,
             track: String,
@@ -59,6 +74,19 @@ class SpotifyBridgeService : NotificationListenerService() {
         }
     }
 
+    private val handler = Handler(Looper.getMainLooper())
+    private var sessionManager: MediaSessionManager? = null
+    private var lastActivePackage: String? = null
+    private val tracked = HashMap<String, Pair<MediaController, MediaController.Callback>>()
+    private val artCache = HashMap<String, ByteArray>()
+
+    private val pushRunnable = Runnable { pushState() }
+
+    private val sessionsListener = MediaSessionManager.OnActiveSessionsChangedListener { list ->
+        refreshSessions(list)
+        schedulePush()
+    }
+
     private val topwayControlReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             val act = intent?.action ?: return
@@ -68,9 +96,8 @@ class SpotifyBridgeService : NotificationListenerService() {
             capturedLogs.add(entry)
 
             if (act == "com.tw.music.spotify.control") {
-                // Numeración deducida del código de TWSpotify (no es texto explícito):
+                // Numeración deducida del código de TWSpotify:
                 // 1 = play, 2 = anterior, 3 = siguiente, otro = pausa.
-                // El número real queda guardado en el registro de la pantalla.
                 when (intent.getIntExtra("controlID", -1)) {
                     1 -> sendControl(KeyEvent.KEYCODE_MEDIA_PLAY)
                     2 -> sendControl(KeyEvent.KEYCODE_MEDIA_PREVIOUS)
@@ -78,19 +105,6 @@ class SpotifyBridgeService : NotificationListenerService() {
                     else -> sendControl(KeyEvent.KEYCODE_MEDIA_PAUSE)
                 }
             }
-        }
-    }
-
-    override fun onListenerConnected() {
-        super.onListenerConnected()
-        try {
-            activeNotifications?.forEach { sbn ->
-                if (sbn.packageName == SPOTIFY_PACKAGE) {
-                    processSpotifyNotification(sbn)
-                }
-            }
-        } catch (e: Exception) {
-            e.printStackTrace()
         }
     }
 
@@ -115,27 +129,136 @@ class SpotifyBridgeService : NotificationListenerService() {
         }
     }
 
-    // Busca la sesión de medios de Spotify (permitido porque este servicio
-    // es un listener de notificaciones con acceso concedido).
-    private fun spotifyController(): MediaController? {
-        return try {
+    override fun onListenerConnected() {
+        super.onListenerConnected()
+        try {
             val msm = getSystemService(Context.MEDIA_SESSION_SERVICE) as MediaSessionManager
-            msm.getActiveSessions(ComponentName(this, SpotifyBridgeService::class.java))
-                .firstOrNull { it.packageName == SPOTIFY_PACKAGE }
+            sessionManager = msm
+            val comp = ComponentName(this, SpotifyBridgeService::class.java)
+            msm.addOnActiveSessionsChangedListener(sessionsListener, comp)
+            refreshSessions(msm.getActiveSessions(comp))
+            activeNotifications?.forEach { sbn ->
+                if (sbn.packageName in allowedPackages) cacheArt(sbn)
+            }
+            schedulePush()
         } catch (e: Exception) {
-            Log.e(TAG, "No se pudo obtener la sesión de Spotify", e)
+            Log.e(TAG, "Error al conectar el listener", e)
+        }
+    }
+
+    override fun onListenerDisconnected() {
+        super.onListenerDisconnected()
+        try {
+            sessionManager?.removeOnActiveSessionsChangedListener(sessionsListener)
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    private fun stateName(s: Int?): String = when (s) {
+        PlaybackState.STATE_PLAYING -> "PLAYING"
+        PlaybackState.STATE_PAUSED -> "PAUSED"
+        PlaybackState.STATE_STOPPED -> "STOPPED"
+        PlaybackState.STATE_BUFFERING -> "BUFFERING"
+        null -> "sin estado"
+        else -> "estado $s"
+    }
+
+    // Registra callbacks solo en las sesiones de las apps permitidas
+    // y deja la lista completa de sesiones para mostrarla en pantalla.
+    private fun refreshSessions(list: List<MediaController>?) {
+        for ((_, pair) in tracked) {
+            try {
+                pair.first.unregisterCallback(pair.second)
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+        tracked.clear()
+
+        val info = mutableListOf<String>()
+        list?.forEach { c ->
+            val pkg = c.packageName
+            val permitida = pkg in allowedPackages
+            info.add("$pkg  [${stateName(c.playbackState?.state)}]  ${if (permitida) "(permitida)" else "(ignorada)"}")
+            if (permitida) {
+                val cb = object : MediaController.Callback() {
+                    override fun onPlaybackStateChanged(state: PlaybackState?) {
+                        if (state?.state == PlaybackState.STATE_PLAYING) lastActivePackage = pkg
+                        schedulePush()
+                    }
+
+                    override fun onMetadataChanged(metadata: MediaMetadata?) {
+                        schedulePush()
+                    }
+                }
+                c.registerCallback(cb, handler)
+                tracked[pkg] = Pair(c, cb)
+            }
+        }
+        detectedSessions.clear()
+        detectedSessions.addAll(info)
+    }
+
+    // Elige qué app mostrar: la que está sonando; si ninguna, la última que sonó.
+    private fun pickController(): MediaController? {
+        var fallback: MediaController? = null
+        for ((pkg, pair) in tracked) {
+            val c = pair.first
+            if (c.playbackState?.state == PlaybackState.STATE_PLAYING) return c
+            if (pkg == lastActivePackage) fallback = c
+        }
+        return fallback ?: tracked.values.firstOrNull()?.first
+    }
+
+    // Junta varios eventos seguidos en un solo envío.
+    private fun schedulePush() {
+        handler.removeCallbacks(pushRunnable)
+        handler.postDelayed(pushRunnable, 300)
+    }
+
+    private fun toJpeg(bmp: Bitmap): ByteArray? {
+        return try {
+            val scaled = Bitmap.createScaledBitmap(bmp, 150, 150, true)
+            val baos = ByteArrayOutputStream()
+            scaled.compress(Bitmap.CompressFormat.JPEG, 75, baos)
+            baos.toByteArray()
+        } catch (e: Exception) {
             null
         }
     }
 
-    private fun isSpotifyPlaying(): Boolean {
-        val c = spotifyController() ?: return true
-        return c.playbackState?.state == PlaybackState.STATE_PLAYING
+    private fun pushState() {
+        try {
+            val c = pickController()
+            if (c == null) {
+                sendTopwayBroadcasts(this, "", "", "", false, null, null)
+                lastPush = "(sin reproductor activo)"
+                return
+            }
+            val md = c.metadata
+            val title = md?.getString(MediaMetadata.METADATA_KEY_TITLE) ?: ""
+            val artist = md?.getString(MediaMetadata.METADATA_KEY_ARTIST)
+                ?: md?.getString(MediaMetadata.METADATA_KEY_ALBUM_ARTIST)
+                ?: ""
+            val album = md?.getString(MediaMetadata.METADATA_KEY_ALBUM) ?: ""
+            val playing = c.playbackState?.state == PlaybackState.STATE_PLAYING
+
+            val bmp = md?.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART)
+                ?: md?.getBitmap(MediaMetadata.METADATA_KEY_ART)
+                ?: md?.getBitmap(MediaMetadata.METADATA_KEY_DISPLAY_ICON)
+            val art: ByteArray? = (if (bmp != null) toJpeg(bmp) else null) ?: artCache[c.packageName]
+
+            sendTopwayBroadcasts(this, title, artist, album, playing, art, null)
+            lastPush = "${c.packageName} | $title | $artist | ${if (playing) "sonando" else "pausa"}"
+        } catch (e: Exception) {
+            Log.e(TAG, "Error al enviar estado a la home", e)
+        }
     }
 
-    // Control preferido: la sesión de medios. Si no se puede, tecla multimedia.
+    // Control preferido: la sesión de medios de la app elegida. Si falla, tecla multimedia.
     private fun sendControl(keyCode: Int) {
-        val c = spotifyController()
+        val c = pickController()
         if (c != null) {
             try {
                 val t = c.transportControls
@@ -150,20 +273,20 @@ class SpotifyBridgeService : NotificationListenerService() {
                 Log.e(TAG, "Fallo transportControls, uso tecla multimedia", e)
             }
         }
-        simulateMediaKey(keyCode)
+        simulateMediaKey(keyCode, c?.packageName ?: "com.spotify.music")
     }
 
-    private fun simulateMediaKey(keyCode: Int) {
+    private fun simulateMediaKey(keyCode: Int, pkg: String) {
         try {
             val downIntent = Intent(Intent.ACTION_MEDIA_BUTTON).apply {
                 putExtra(Intent.EXTRA_KEY_EVENT, KeyEvent(KeyEvent.ACTION_DOWN, keyCode))
-                setPackage(SPOTIFY_PACKAGE)
+                setPackage(pkg)
             }
             sendOrderedBroadcast(downIntent, null)
 
             val upIntent = Intent(Intent.ACTION_MEDIA_BUTTON).apply {
                 putExtra(Intent.EXTRA_KEY_EVENT, KeyEvent(KeyEvent.ACTION_UP, keyCode))
-                setPackage(SPOTIFY_PACKAGE)
+                setPackage(pkg)
             }
             sendOrderedBroadcast(upIntent, null)
         } catch (e: Exception) {
@@ -171,43 +294,36 @@ class SpotifyBridgeService : NotificationListenerService() {
         }
     }
 
-    override fun onNotificationPosted(sbn: StatusBarNotification?) {
-        super.onNotificationPosted(sbn)
-        if (sbn?.packageName == SPOTIFY_PACKAGE) {
-            processSpotifyNotification(sbn)
-        }
-    }
-
-    private fun processSpotifyNotification(sbn: StatusBarNotification) {
-        val extras = sbn.notification.extras
-        val title = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString() ?: "Spotify"
-        val artist = extras.getCharSequence(Notification.EXTRA_TEXT)?.toString() ?: ""
-        val subText = extras.getCharSequence(Notification.EXTRA_SUB_TEXT)?.toString() ?: ""
-
-        // Carátula de la notificación, convertida a bytes JPEG
-        var artBytes: ByteArray? = null
+    // Carátula de respaldo: la imagen grande de la notificación de la app.
+    private fun cacheArt(sbn: StatusBarNotification) {
         try {
+            val extras = sbn.notification.extras
             val largeIcon = sbn.notification.getLargeIcon()
             val drawable = largeIcon?.loadDrawable(this)
             val bmp = (drawable as? BitmapDrawable)?.bitmap
                 ?: extras.getParcelable<Bitmap>(Notification.EXTRA_LARGE_ICON)
             if (bmp != null) {
-                val scaled = Bitmap.createScaledBitmap(bmp, 150, 150, true)
-                val baos = ByteArrayOutputStream()
-                scaled.compress(Bitmap.CompressFormat.JPEG, 75, baos)
-                artBytes = baos.toByteArray()
+                val bytes = toJpeg(bmp)
+                if (bytes != null) artCache[sbn.packageName] = bytes
             }
         } catch (e: Exception) {
             e.printStackTrace()
         }
+    }
 
-        sendTopwayBroadcasts(this, title, artist, subText, isSpotifyPlaying(), artBytes, null)
+    override fun onNotificationPosted(sbn: StatusBarNotification?) {
+        super.onNotificationPosted(sbn)
+        if (sbn != null && sbn.packageName in allowedPackages) {
+            cacheArt(sbn)
+            schedulePush()
+        }
     }
 
     override fun onNotificationRemoved(sbn: StatusBarNotification?) {
         super.onNotificationRemoved(sbn)
-        if (sbn?.packageName == SPOTIFY_PACKAGE) {
-            sendTopwayBroadcasts(this, "", "", "", false, null, null)
+        if (sbn != null && sbn.packageName in allowedPackages) {
+            artCache.remove(sbn.packageName)
+            schedulePush()
         }
     }
 }
