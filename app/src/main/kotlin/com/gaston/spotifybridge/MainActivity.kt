@@ -49,6 +49,21 @@ class MainActivity : Activity() {
         }
         layout.addView(btnTest)
 
+        val btnActive = Button(this).apply {
+            text = "3. (Opcional) Despertar TWSpotify: com.spotify.music.active"
+            setOnClickListener {
+                this@MainActivity.sendBroadcast(Intent("com.spotify.music.active"))
+                Toast.makeText(this@MainActivity, "Enviado com.spotify.music.active", Toast.LENGTH_SHORT).show()
+            }
+        }
+        layout.addView(btnActive)
+
+        val btnRefresh = Button(this).apply {
+            text = "4. Actualizar registro"
+            setOnClickListener { refreshLogs() }
+        }
+        layout.addView(btnRefresh)
+
         logText = TextView(this).apply {
             setTextColor(Color.GREEN)
             textSize = 14f
@@ -72,11 +87,11 @@ class MainActivity : Activity() {
         val isGranted = enabledListeners.contains(packageName)
 
         val sb = StringBuilder()
-        sb.append("=== ESTADO DEL PUENTE ===\n")
+        sb.append("=== ESTADO DEL PUENTE (version v2: musicinfo fiel a TWSpotify) ===\n")
         sb.append("Permiso Notificaciones: ${if (isGranted) "ACTIVO (OK)" else "INACTIVO (Toca el boton 1)"}\n\n")
-        sb.append("=== COMANDOS RECIBIDOS DEL WIDGET ===\n")
+        sb.append("=== COMANDOS RECIBIDOS DE LA HOME ===\n")
         if (SpotifyBridgeService.capturedLogs.isEmpty()) {
-            sb.append("(Ninguno aún. Toca Play/Next en el widget Driving y vuelve aquí)\n")
+            sb.append("(Ninguno aun. Toca Play/Next en la home Driving y vuelve aqui)\n")
         } else {
             SpotifyBridgeService.capturedLogs.forEach {
                 sb.append("-> $it\n")
