@@ -25,10 +25,9 @@ class SpotifyBridgeService : NotificationListenerService() {
 
     companion object {
         private const val TAG = "SpotifyBridge"
+        const val PREFS_DIAG = "bridge_diag"
 
         // Apps cuya música se manda a la home. Para agregar otra, sumá su paquete acá.
-        // (El paquete de AIMP es el que conozco, pero verificalo con la lista
-        //  "SESIONES DE MEDIOS DETECTADAS" que muestra la app mientras suena.)
         val allowedPackages = setOf(
             "com.spotify.music",
             "com.google.android.apps.youtube.music",
@@ -39,6 +38,22 @@ class SpotifyBridgeService : NotificationListenerService() {
         val capturedLogs = mutableListOf<String>()
         val detectedSessions = mutableListOf<String>()
         var lastPush: String = "(ninguno)"
+        var listenerConnected: Boolean = false
+
+        // Pide al sistema que vuelva a conectar el servicio (equivale a apagar y
+        // prender el permiso, pero sin tocar los ajustes). Sirve desde la app o
+        // desde el propio servicio.
+        fun rebind(context: Context) {
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                    NotificationListenerService.requestRebind(
+                        ComponentName(context, SpotifyBridgeService::class.java)
+                    )
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "No se pudo pedir la reconexión", e)
+            }
+        }
 
         // Carátula mínima (cuadrado gris) para cuando no hay imagen:
         // TWSpotify siempre manda un byte[] en msg_Albumart.
@@ -108,8 +123,22 @@ class SpotifyBridgeService : NotificationListenerService() {
         }
     }
 
+    // Guarda la hora de cada evento en el almacenamiento de la app, para que
+    // sobreviva a los apagados y se pueda ver después qué pasó.
+    private fun mark(key: String) {
+        try {
+            getSharedPreferences(PREFS_DIAG, Context.MODE_PRIVATE)
+                .edit()
+                .putLong(key, System.currentTimeMillis())
+                .apply()
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
     override fun onCreate() {
         super.onCreate()
+        mark("create")
         val filter = IntentFilter().apply {
             addAction("com.tw.music.spotify.control")
         }
@@ -122,6 +151,8 @@ class SpotifyBridgeService : NotificationListenerService() {
 
     override fun onDestroy() {
         super.onDestroy()
+        mark("destroy")
+        listenerConnected = false
         try {
             unregisterReceiver(topwayControlReceiver)
         } catch (e: Exception) {
@@ -131,6 +162,8 @@ class SpotifyBridgeService : NotificationListenerService() {
 
     override fun onListenerConnected() {
         super.onListenerConnected()
+        listenerConnected = true
+        mark("connected")
         try {
             val msm = getSystemService(Context.MEDIA_SESSION_SERVICE) as MediaSessionManager
             sessionManager = msm
@@ -148,11 +181,15 @@ class SpotifyBridgeService : NotificationListenerService() {
 
     override fun onListenerDisconnected() {
         super.onListenerDisconnected()
+        listenerConnected = false
+        mark("disconnected")
         try {
             sessionManager?.removeOnActiveSessionsChangedListener(sessionsListener)
         } catch (e: Exception) {
             e.printStackTrace()
         }
+        // Si el sistema nos suelta, pedimos que nos vuelva a conectar.
+        rebind(this)
     }
 
     private fun stateName(s: Int?): String = when (s) {
@@ -251,6 +288,7 @@ class SpotifyBridgeService : NotificationListenerService() {
 
             sendTopwayBroadcasts(this, title, artist, album, playing, art, null)
             lastPush = "${c.packageName} | $title | $artist | ${if (playing) "sonando" else "pausa"}"
+            mark("push")
         } catch (e: Exception) {
             Log.e(TAG, "Error al enviar estado a la home", e)
         }
