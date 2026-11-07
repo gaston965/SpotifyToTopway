@@ -63,6 +63,21 @@
             </intent-filter>
         </activity>
 
+        <!-- Pantalla invisible que se abre cuando se conecta un dispositivo USB -->
+        <activity
+            android:name=".UsbWakeActivity"
+            android:exported="true"
+            android:theme="@android:style/Theme.NoDisplay"
+            android:excludeFromRecents="true"
+            android:noHistory="true">
+            <intent-filter>
+                <action android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED" />
+            </intent-filter>
+            <meta-data
+                android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED"
+                android:resource="@xml/device_filter" />
+        </activity>
+
     </application>
 
 </manifest>
