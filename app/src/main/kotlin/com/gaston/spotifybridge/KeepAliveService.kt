@@ -112,6 +112,7 @@ class KeepAliveService : Service() {
         } catch (e: Exception) {
             Log.e(TAG, "No se pudo registrar el receptor de avisos", e)
         }
+        AlarmReceiver.schedule(this)
         writeHeartbeat()
         handler.postDelayed(tick, FIRST_TICK_MS)
     }
