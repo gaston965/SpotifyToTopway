@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Sin atributos: coincide con cualquier dispositivo USB. -->
+<resources>
+    <usb-device />
+</resources>
