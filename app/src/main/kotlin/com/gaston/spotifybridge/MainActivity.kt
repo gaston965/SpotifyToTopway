@@ -117,6 +117,7 @@ class MainActivity : Activity() {
         // Si el permiso está activo pero el servicio no está conectado,
         // al abrir la app se pide la reconexión automáticamente.
         KeepAliveService.start(this)
+        AlarmReceiver.schedule(this)
         if (hasPermission() && !SpotifyBridgeService.listenerConnected) {
             SpotifyBridgeService.forceRebind(this)
             logText.postDelayed({ refreshLogs() }, 1500)
@@ -225,7 +226,7 @@ class MainActivity : Activity() {
         val bootTime = System.currentTimeMillis() - SystemClock.elapsedRealtime()
 
         val sb = StringBuilder()
-        sb.append("=== ESTADO DEL PUENTE (version v3.5) ===\n")
+        sb.append("=== ESTADO DEL PUENTE (version v3.6) ===\n")
         sb.append("Permiso Notificaciones: ${if (isGranted) "ACTIVO (OK)" else "INACTIVO (Toca el boton 1)"}\n")
         sb.append("Servicio conectado ahora: ${if (SpotifyBridgeService.listenerConnected) "SI" else "NO"}\n")
         sb.append("Excluida de optimizacion de bateria: ${if (isIgnoringBattery()) "SI" else "NO"}\n\n")
@@ -241,6 +242,8 @@ class MainActivity : Activity() {
         sb.append("Latido proceso ANTERIOR: ${fmt(prefs.getLong("prev_heartbeat", 0L))}\n")
         sb.append("Latido proceso actual:   ${fmt(prefs.getLong("heartbeat", 0L))}\n")
         sb.append("Reconexion automatica:   ${fmt(prefs.getLong("watchdog_rebind", 0L))}\n")
+        sb.append("Alarma (ultimo disparo):  ${fmt(prefs.getLong("alarm", 0L))}\n")
+        sb.append("Alarma que revivio:      ${fmt(prefs.getLong("alarm_revive", 0L))}\n")
         sb.append("Ultimo envio a la home: ${fmt(prefs.getLong("push", 0L))}\n\n")
 
         sb.append("=== AVISOS DE ENCENDIDO/APAGADO RECIBIDOS ===\n")
