@@ -6,6 +6,7 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.drawable.BitmapDrawable
 import android.media.MediaMetadata
@@ -53,6 +54,30 @@ class SpotifyBridgeService : NotificationListenerService() {
             } catch (e: Exception) {
                 Log.e(TAG, "No se pudo pedir la reconexión", e)
             }
+        }
+
+        // Reconexión "a la fuerza": apaga y vuelve a prender el componente del
+        // servicio (lo mismo que dispara el sistema cuando cambia el paquete) y
+        // después pide la reconexión. Es el equivalente de apagar y prender el
+        // permiso de notificaciones a mano.
+        fun forceRebind(context: Context) {
+            try {
+                val pm = context.packageManager
+                val cn = ComponentName(context, SpotifyBridgeService::class.java)
+                pm.setComponentEnabledSetting(
+                    cn,
+                    PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
+                    PackageManager.DONT_KILL_APP
+                )
+                pm.setComponentEnabledSetting(
+                    cn,
+                    PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
+                    PackageManager.DONT_KILL_APP
+                )
+            } catch (e: Exception) {
+                Log.e(TAG, "No se pudo reiniciar el componente", e)
+            }
+            rebind(context)
         }
 
         // Carátula mínima (cuadrado gris) para cuando no hay imagen:
@@ -164,6 +189,7 @@ class SpotifyBridgeService : NotificationListenerService() {
         super.onListenerConnected()
         listenerConnected = true
         mark("connected")
+        KeepAliveService.start(this)
         try {
             val msm = getSystemService(Context.MEDIA_SESSION_SERVICE) as MediaSessionManager
             sessionManager = msm
