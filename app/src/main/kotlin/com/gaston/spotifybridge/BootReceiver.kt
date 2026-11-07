@@ -19,6 +19,7 @@ class BootReceiver : BroadcastReceiver() {
         } catch (e: Exception) {
             e.printStackTrace()
         }
-        SpotifyBridgeService.rebind(context)
+        KeepAliveService.start(context)
+        SpotifyBridgeService.forceRebind(context)
     }
 }
