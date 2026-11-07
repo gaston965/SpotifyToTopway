@@ -49,6 +49,11 @@
             </intent-filter>
         </receiver>
 
+        <!-- Alarma repetitiva sin despertar: revive la app cuando el stereo despierta -->
+        <receiver
+            android:name=".AlarmReceiver"
+            android:exported="false" />
+
         <activity
             android:name=".MainActivity"
             android:exported="true">
