@@ -99,6 +99,12 @@ class MainActivity : Activity() {
         }
         layout.addView(btnReceivers)
 
+        val btnApk = Button(this).apply {
+            text = "8. Copiar APK del Gestor de archivos + (para analizarlo)"
+            setOnClickListener { copyApk("com.alphainventor.filemanager") }
+        }
+        layout.addView(btnApk)
+
         logText = TextView(this).apply {
             setTextColor(Color.GREEN)
             textSize = 14f
@@ -183,6 +189,18 @@ class MainActivity : Activity() {
         }
     }
 
+    // Copia el APK instalado de una app a la carpeta de esta app, para poder analizarlo.
+    private fun copyApk(pkg: String) {
+        try {
+            val src = packageManager.getApplicationInfo(pkg, 0).sourceDir
+            val destino = getExternalFilesDir(null)
+            File(src).copyTo(File(destino, "$pkg.apk"), overwrite = true)
+            Toast.makeText(this, "Copiado: $destino/$pkg.apk", Toast.LENGTH_LONG).show()
+        } catch (e: Exception) {
+            Toast.makeText(this, "Error: ${e.message}", Toast.LENGTH_LONG).show()
+        }
+    }
+
     private fun isIgnoringBattery(): Boolean {
         return try {
             val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
@@ -226,7 +244,7 @@ class MainActivity : Activity() {
         val bootTime = System.currentTimeMillis() - SystemClock.elapsedRealtime()
 
         val sb = StringBuilder()
-        sb.append("=== ESTADO DEL PUENTE (version v3.6) ===\n")
+        sb.append("=== ESTADO DEL PUENTE (version v3.7) ===\n")
         sb.append("Permiso Notificaciones: ${if (isGranted) "ACTIVO (OK)" else "INACTIVO (Toca el boton 1)"}\n")
         sb.append("Servicio conectado ahora: ${if (SpotifyBridgeService.listenerConnected) "SI" else "NO"}\n")
         sb.append("Excluida de optimizacion de bateria: ${if (isIgnoringBattery()) "SI" else "NO"}\n\n")
@@ -244,6 +262,7 @@ class MainActivity : Activity() {
         sb.append("Reconexion automatica:   ${fmt(prefs.getLong("watchdog_rebind", 0L))}\n")
         sb.append("Alarma (ultimo disparo):  ${fmt(prefs.getLong("alarm", 0L))}\n")
         sb.append("Alarma que revivio:      ${fmt(prefs.getLong("alarm_revive", 0L))}\n")
+        sb.append("USB desperto la app:     ${fmt(prefs.getLong("usb_wake", 0L))}\n")
         sb.append("Ultimo envio a la home: ${fmt(prefs.getLong("push", 0L))}\n\n")
 
         sb.append("=== AVISOS DE ENCENDIDO/APAGADO RECIBIDOS ===\n")
