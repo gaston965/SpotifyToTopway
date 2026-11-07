@@ -19,6 +19,7 @@ class BootReceiver : BroadcastReceiver() {
         } catch (e: Exception) {
             e.printStackTrace()
         }
+        AlarmReceiver.schedule(context)
         KeepAliveService.start(context)
         SpotifyBridgeService.forceRebind(context)
     }
