@@ -4,6 +4,16 @@
     <!-- Permite recibir el aviso de "el equipo terminó de encender" -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
+    <!-- Permisos para el servicio en primer plano que mantiene viva la app -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+
+    <!-- Permite pedir que la app quede excluida del ahorro de batería -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+
+    <!-- Permite listar las apps instaladas (para el reporte de quién escucha el encendido) -->
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
+
     <application
         android:allowBackup="true"
         android:icon="@android:drawable/ic_media_play"
@@ -19,6 +29,12 @@
                 <action android:name="android.service.notification.NotificationListenerService" />
             </intent-filter>
         </service>
+
+        <!-- Servicio en primer plano: mantiene viva la app y vigila la conexión -->
+        <service
+            android:name=".KeepAliveService"
+            android:exported="false"
+            android:foregroundServiceType="mediaPlayback" />
 
         <!-- Al encender el equipo (o instalar/actualizar la app) pide reconectar el servicio -->
         <receiver
