@@ -105,6 +105,31 @@ class MainActivity : Activity() {
         }
         layout.addView(btnApk)
 
+        val btnUsage = Button(this).apply {
+            text = "9. Dar permiso de datos de uso (para la redireccion)"
+            setOnClickListener { openSettingsSafe(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)) }
+        }
+        layout.addView(btnUsage)
+
+        val btnOverlay = Button(this).apply {
+            text = "10. Dar permiso de mostrar sobre otras apps"
+            setOnClickListener {
+                val i = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION)
+                i.data = Uri.parse("package:" + this@MainActivity.packageName)
+                openSettingsSafe(i)
+            }
+        }
+        layout.addView(btnOverlay)
+
+        val btnRedirect = Button(this).apply {
+            text = "11. Redireccion ON/OFF"
+            setOnClickListener {
+                RedirectWatcher.setEnabled(this@MainActivity, !RedirectWatcher.isEnabled(this@MainActivity))
+                refreshLogs()
+            }
+        }
+        layout.addView(btnRedirect)
+
         logText = TextView(this).apply {
             setTextColor(Color.GREEN)
             textSize = 14f
@@ -201,6 +226,22 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun openSettingsSafe(i: Intent) {
+        try {
+            startActivity(i)
+        } catch (e: Exception) {
+            Toast.makeText(this, "Tu stereo no tiene esa pantalla de ajustes", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun hasSettingsScreen(action: String): Boolean {
+        return try {
+            packageManager.resolveActivity(Intent(action), 0) != null
+        } catch (e: Exception) {
+            false
+        }
+    }
+
     private fun isIgnoringBattery(): Boolean {
         return try {
             val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
@@ -244,10 +285,14 @@ class MainActivity : Activity() {
         val bootTime = System.currentTimeMillis() - SystemClock.elapsedRealtime()
 
         val sb = StringBuilder()
-        sb.append("=== ESTADO DEL PUENTE (version v3.7) ===\n")
+        sb.append("=== ESTADO DEL PUENTE (version v3.8) ===\n")
         sb.append("Permiso Notificaciones: ${if (isGranted) "ACTIVO (OK)" else "INACTIVO (Toca el boton 1)"}\n")
         sb.append("Servicio conectado ahora: ${if (SpotifyBridgeService.listenerConnected) "SI" else "NO"}\n")
-        sb.append("Excluida de optimizacion de bateria: ${if (isIgnoringBattery()) "SI" else "NO"}\n\n")
+        sb.append("Excluida de optimizacion de bateria: ${if (isIgnoringBattery()) "SI" else "NO"}\n")
+        sb.append("Redireccion al reproductor activo: ${if (RedirectWatcher.isEnabled(this)) "ACTIVADA" else "DESACTIVADA"}\n")
+        sb.append("   permiso datos de uso: ${if (RedirectWatcher.hasUsageAccess(this)) "SI" else "NO"}   permiso superponer: ${if (RedirectWatcher.hasOverlay(this)) "SI" else "NO"}\n")
+        sb.append("   pantallas de ajustes disponibles: datos de uso ${if (hasSettingsScreen(Settings.ACTION_USAGE_ACCESS_SETTINGS)) "SI" else "NO"}, superponer ${if (hasSettingsScreen(Settings.ACTION_MANAGE_OVERLAY_PERMISSION)) "SI" else "NO"}\n")
+        sb.append("   ultima redireccion: ${prefs.getString("redirect_last", "nunca")}\n\n")
 
         sb.append("=== DIAGNOSTICO (para entender los cortes) ===\n")
         sb.append("Equipo encendido desde: ${fmt(bootTime)}\n")
