@@ -77,6 +77,7 @@ class KeepAliveService : Service() {
 
     private val handler = Handler(Looper.getMainLooper())
     private var lastRebind = 0L
+    private var watcher: RedirectWatcher? = null
 
     private val tick = object : Runnable {
         override fun run() {
@@ -113,6 +114,8 @@ class KeepAliveService : Service() {
             Log.e(TAG, "No se pudo registrar el receptor de avisos", e)
         }
         AlarmReceiver.schedule(this)
+        watcher = RedirectWatcher(this, handler)
+        watcher?.start()
         writeHeartbeat()
         handler.postDelayed(tick, FIRST_TICK_MS)
     }
@@ -123,6 +126,7 @@ class KeepAliveService : Service() {
 
     override fun onDestroy() {
         handler.removeCallbacks(tick)
+        watcher?.stop()
         try {
             unregisterReceiver(wakeReceiver)
         } catch (e: Exception) {
