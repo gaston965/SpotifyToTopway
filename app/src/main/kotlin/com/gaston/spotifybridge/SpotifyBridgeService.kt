@@ -41,6 +41,9 @@ class SpotifyBridgeService : NotificationListenerService() {
         var lastPush: String = "(ninguno)"
         var listenerConnected: Boolean = false
 
+        // Apps que están sonando ahora mismo (lo usa la redirección).
+        var playingNow: Set<String> = emptySet()
+
         // Pide al sistema que vuelva a conectar el servicio (equivale a apagar y
         // prender el permiso, pero sin tocar los ajustes). Sirve desde la app o
         // desde el propio servicio.
@@ -293,6 +296,11 @@ class SpotifyBridgeService : NotificationListenerService() {
 
     private fun pushState() {
         try {
+            val playingSet = HashSet<String>()
+            for ((pkg, pair) in tracked) {
+                if (pair.first.playbackState?.state == PlaybackState.STATE_PLAYING) playingSet.add(pkg)
+            }
+            playingNow = playingSet
             val c = pickController()
             if (c == null) {
                 sendTopwayBroadcasts(this, "", "", "", false, null, null)
